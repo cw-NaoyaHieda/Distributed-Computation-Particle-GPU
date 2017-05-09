@@ -1,0 +1,101 @@
+---
+title: Disributed Computation Paticle Filters on GPU Architectures for Real-Time
+  Conrol Applications
+author: "Naoya Hieda"
+date: "2017年4月29日"
+output:
+  html_document:
+    css: styles.css
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,warning = FALSE,message = FALSE)
+```
+
+# 要約
+
+## Abstract
+GCPでリアルタイムなParticleFilterを実施する  
+提案するFilterはいくつかのsubfiltersで構成されている  
+特にresamplingの部分でのGCPへの実施に注目する  
+粒子交換の数や、粒子交換トポロジーの効果を分析する(exchanged particles)  
+GCPとCPUの両方を用いることで、fast real-timeなparticlefilterを実装することができる  
+ロボットアームのrealtime visual servoingで1000個以上のpartilceによるfilterが実装できることが示されている  
+
+## Introduction
+
+ParticleFilterは簡単で一般性があるため、盛んな研究分野として成長し続けている  
+ParticleFilterとunscentedカルマンフィルタとmoving horizon estimationは、非線形でnon-Gausianな動的なシステムの状態推定の一般的フレームワーク。  
+十分な数のParticleが導入できれば、他の方法よりも簡単に結果を出せる  
+主な課題は計算量が必要なこと  
+正確で迅速な計算が行えないことがParticleFilterの限界  
+最近の研究の多くの目的はこの問題の克服  
+とりわけGCPは並列処理で実行時間の短縮が狙える。  
+並列処理をうまく実装できるソフトウェアフレームワークの開発は計算科学や工学的にも不可欠。  
+本論文の主な貢献は、異なるコンピューティングユニット間での計算の分散の提案である。  
+特に、最先端のGPUソリューションに関して、パーティクルの数、サンプリング周波数、および状態の次元をしばしば桁違いに増加させることができる。
+さらに、計算量が10倍から100倍であるcentralized particle filtersと同等の精度を出せることを示す。
+
+- Section2では、ParticleFilterの導入と、問題と主な調査対象(つまり、異なるコンピューティングユニット間での計算の分散)を準備する  
+- Section3では、分散の技術とParticlefilterを分散計算させる方法の予備知識をを示す
+- Section4では、すでに存在する方法での異なるコンピューティングユニット間での計算の分散への解決を調べる
+- Section5では、その異なる部分、その能力、およびユーザ調整可能パラメータの効果を詳細に分析するアルゴリズムを提案する
+- Section6では、アプローチの妥当性を評価するために実験とシミュレーションの結果を説明し、非線形推定が効率的に、比較的高いサンプリング周波数で実行できることを示す。
+- Section7では、将来の研究研究のための結論と勧告を描く
+
+## Problem Setup And Research Question
+非線形で離散時間の動的なシステムとして以下のような式を考える
+$$
+x(k)=f(x(k-1),w(k-1))\\
+z(k)=h(x(k),\mu(k))
+$$
+ここで、f,hはそれぞれ非線形な関数でx(k)が状態ベクトル、w,$\mu$がnoize、z(k)が観測ベクトルを表す。  
+x(0)は既知か推定するかして、noiseはiidを仮定している。  
+z(k)からx(k)を推定することに興味がある。  
+ParticleFilterでは、x(k)の推定を事後分布p(x(k)|z(k))から行う。  
+しかし、この事後分布の評価は、仮定しているシステムの基では複雑で困難である。  
+この問題の解決方法として、m個のランダムサンプルを事前分布p(x(k)|z(k))から得る。  
+多くの場合、この事前分布としてはSIRfilterと同様にp(x(k)|x(k-1))が選ばれる。  
+x(k)は次の関数で選択される
+$$
+x(k)^j=x(0) \;\;\;\;\; j=1,\dots,m\\
+x(k)^j=f(x(k-1)^j,w(k-1)^j)
+$$
+このサンプルには再帰的にweightが計算される
+$$
+w(0)^j=\frac{1}{m}\\
+w(k)^j=\frac{p(x(k)^j|z(k))}{q(x(k)^j|z(k))}\frac{p(x(k)^j|z(k))}{p(x(k)^j|x(k-1)^j)}\\
+=w(k-1)^jp(z(k)|x(k)^j)
+$$
+ここで$p(z(k)|x(k)^j)$は尤度。もし、$\mu$が従う分布が正規分布で、その平均ベクトルが0ベクトルであれば、w(k)は以下のように書き換えられる
+$$
+w(k)^j=w(k-1)^jexp(-||z(k)-h(x(k)^j)||^2_{\Sigma})
+$$
+ここで$||v||^2_{\Sigma}=v^TAv$である。$(x(k)^j,w(k)^j)$が与えられれば、事後分布をディラックのデルタを用いて以下のように近似できる。
+$$
+p(x(k)|z(k))\approx\hat{p}(x(k)|z(k))\\
+=\frac{1}{\Omega(k)}\sum_{j=1}^{m}w(k)^j\delta(x(k)-x(k)^j)
+$$
+ここで$\Omega(k)=\sum_{j=1}^{m}w(k)^j$。
+さらに、weightが決定した後、particleは再サンプリングされ新しい重量は同一に設定される。このリサンプリングのステップはParticlefilterのアルゴリズムにおいてとても重要である。よりよく正確な近似をするために、もっと言えば、縮退現象を克服するためである。  
+しかしながら、これはほかの注意すべき問題を引きおこす。まず、すべてのParticleを結合させる必要があるため並列化計算の機会に制限がある。次に、weightが高いParticleはリサンプリングで何回も選択される。結果Paticleの多様性が失われ、サンプルは同じ点に偏ってしまう。よってParticleの数とリサンプリングの手法はParticleFilterの特性の基本を決定づける。  
+
+ここまでをまとめ、プロトタイプのSIR ParticleFilterのアルゴリズムは以下のようになる。
+
+1. m個のサンプルをP(x(k)|x(k-1))から抽出する
+2. 重点密度w(k)^jを計算する
+3. 状態(事後分布)を近似する
+4. リサンプルする
+5. 全てのParticleに対して同等の重みを与える
+
+次元数が5を超えると、正確な推定のために必要な多くのParticleが必要になる。そのため計算時間が多くなりシングルコアのCPUでParticleFilterを実施することは時間的問題に直面する。GPUの並列処理によってこの問題を解決することができる期待がある。  
+この研究での問題は
+Particlefiterは、GPUアーキテクチャなどを利用して効率的に動作し、サンプルレートの高いリアルタイムフィードバック制御アプリケーションで正確な見積もりを実現できるのだろうか？  
+ということである
+
+
+
+# Distributed Computation Particle Filters
+推定する計算を分散することは二つの理由で、研究者に注目されている。  
+一つは、
+
