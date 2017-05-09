@@ -166,7 +166,8 @@ $$
 X_1 = \sqrt{-2 \log (U_1)} \cos (2 \pi U_2)\\
 X_2 = \sqrt{-2 \log (U_1)} \sin (2 \pi U_2)
 $$
-は独立同分布の$N_{[0,1]}$になる。
+は独立同分布の$N_{[0,1]}$になる。  　　
+本にコードがなかったのでR版は省略
 
 ```{python}
 # Box-Mullerアルゴリズムを用いて標準正規分布N(0,1)に従う乱数を生成
@@ -211,3 +212,272 @@ plt.savefig('figure/box.png', bbox_inches='tight')
 ```
 
 ![](figure/box.png)
+
+# CLTに基づくアルゴリズム
+中心極限定理(CLT: Central Limit Theorem)に基づく近似アルゴリズム   
+こちらもPythonのみ  
+[-0.5,0.5]の一様乱数12個を足し合わせることで1つの正規乱数を生成している。たぶん去年同じことやった  
+これが正規分布になる証明がわかったのでそれも確認
+## 証明
+中心極限定理によると平均が$\mu$、分散が$sigma^2$で独立同分布iidのn個の確率変数$X_1,X_2,\dots,X_n$ の平均
+
+$S_n=\frac{X_1+X_2+\dots+Xn}{n}$
+は、nが大きい場合、正規分布 $N(\mu,\sigma^2/n)$に近づく。
+今回は平均$\mu=0$、分散$\sigma^2=1/12$になる一様分布を使っていて確率変数の数はn=12なので、中心極限定理より
+$$S_{12}=\frac{1}{12}∑_{i=1}^{12}X_i$$
+は、$N(0,1/12^2)$に従う。つまり、
+$$12S_{12}=∑_{i=1}^{12}X_i（12個の一様分布の単なる和）$$
+は、N(0, 1)の標準正規分布に従う
+```{python}
+# 中心極限定理（CLT）による正規乱数生成器
+import numpy as np
+from scipy.stats import uniform, norm
+import matplotlib.pyplot as plt
+
+# 独立した一様分布からそれぞれ一様乱数を生成
+np.random.seed()
+N = 100000
+
+# 12個の一様乱数を使用
+K = 12
+
+# (-0.5, 0.5)の一様乱数を生成
+rv = uniform(loc=-0.5, scale=1.0)
+U = rv.rvs(K * N).reshape((K, -1))
+
+# K個の一様分布の和から正規分布を生成
+Z = np.sum(U, axis=0)
+
+# 変換した乱数の分布と標準正規分布の真のpdfを描画
+plt.figure(1)
+nbins = 50
+plt.hist(Z, nbins, normed=True)
+
+rv = norm(loc=0, scale=1)
+x = np.linspace(rv.ppf(0.01), rv.ppf(0.99), 1000)
+y = rv.pdf(x)
+plt.plot(x, y, 'r-', lw=2)
+plt.xlim((rv.ppf(0.01), rv.ppf(0.99)))
+
+plt.savefig('figure/CLT.png',bbox_inches='tight')
+```
+![](figure/CLT.png)
+
+# 離散的な乱数の生成
+逆変換法の原理とほとんど同じ
+
+1. $X\sim P_\theta$を生成することを考える。ここで、$P_θ$の台（確率変数の取る値の集合）を自然数とする。
+2. $p_0=P_\theta(X\leq0),p_1=P_\theta(X\leq1),p_2=P_\theta(X\leq2),\dots$ を計算する。
+3. $U\sim U[0,1]$ を生成し、$X=k \hspace{5mm} if \hspace{3mm} p_{k-1} < U < p_k$ とする。
+
+これで、一様乱数Uから離散分布$P_θ$に従う乱数Xが1つ生成される。実際にポアソン分布に対する乱数生成
+
+```{r}
+Nsim <- 10^4;lambda <- 4
+spread <- 3*sqrt(lambda)
+t <- round(seq(max(0,lambda-spread),lambda+spread,1))
+prob <- ppois(t,lambda)
+X <- rep(0,Nsim)
+for(i in 1:Nsim){
+  u <- runif(1)
+  X[i] <- t[1] + sum(prob < u)
+}
+ggplot(data.frame(X),aes(X))+geom_histogram(binwidth = 1)
+```
+
+```{python}
+# ポアソン分布に従う乱数を累積分布関数から生成
+import numpy as np
+from scipy.stats import uniform, poisson
+import matplotlib.pyplot as plt
+
+# ポアソン分布のパラメータ
+lam = 4
+
+# この値まで確率値を計算
+K = 20
+
+# サンプリング数
+N = 10000
+
+rv = poisson(mu=lam)
+
+# cdfの表を計算
+t = np.arange(K)
+prob = rv.cdf(t)
+
+X = []
+for i in range(N):
+    u = uniform.rvs(loc=0, scale=1, size=1)
+    # prob < uはcdfがuより小さいときTRUEを返す
+    # TRUEは1と解釈されるのでsum()でTRUEの数をカウントして
+    # インデックスを求めている
+    X.append(np.sum(prob < u))
+
+# ポアソン分布に従う乱数の分布を描画
+# hist()のnormed=Trueはバーの積分が1になる確率密度関数になるため離散分布では使えない
+# 離散分布ではバーの高さの合計が1になる確率質量関数にする必要がある
+# http://stackoverflow.com/questions/3866520/plotting-histograms-whose-bar-heights-sum-to-1-in-matplotlib
+plt.figure(1)
+nbins = np.arange(-0.5, K, 1.0)
+weights = np.ones_like(X) / float(len(X))
+plt.hist(X, nbins, weights=weights)
+plt.plot(t, rv.pmf(t), 'ro-', lw=1)
+plt.xlim((0, K))
+
+plt.savefig('figure/poisson.png',bbox_inches='tight')
+```
+![Output](figure/poisson.png)
+
+# 混合分布から乱数を生成
+確率分布fが別の確率分布gとpの混合分布として次のように書ける
+$$\displaystyle f(x) = \int_Y g(x|y) p(y) dy$$
+たとえば、スチューデントのt分布fは、カイ二乗分布pと正規分布gという二つの分布の混合で表せる　　
+負の二項分布はガンマ分布とポアソン分布で表せる
+
+1. 分布p(y)に従う乱数yを生成し、
+2. 分布g(x|y)に従う乱数xを生成すると、
+3. xは分布f(x)に従う乱数になっている
+
+```{r}
+Nsim <- 10^4
+n <- 6;p <- 0.3
+y <- rgamma(Nsim, n, rate=p/(1-p))
+x <- rpois(Nsim, y)
+lines <- dnbinom(1:50,n,p)
+ggplot() + geom_histogram(data.frame(point = x),mapping=aes(x=point), binwidth=1, fill="skyblue") + geom_line(data.frame(x=c(1:50),lines),mapping=aes(x=x,y=lines*(10^4)),colour="blue",size=2)
+```
+
+
+```{python}
+# 混合分布によってガンマ乱数から負の二項分布に従う乱数を生成
+# Y〜Gamma(n,(1-p)/p) && X|y〜Poisson(y) => X〜Neg(n,p)
+import numpy as np
+from scipy.stats import gamma, poisson, nbinom
+import matplotlib.pyplot as plt
+
+# 負の二項分布のパラメータ
+n = 6
+p = 0.3
+
+# この値まで確率値を計算
+K = 50
+
+# サンプリング数
+N = 100000
+
+# ガンマ分布に従う乱数を生成
+Y = gamma(a=n, scale=(1-p)/p).rvs(size=N)
+
+# 生成したガンマ分布の乱数をパラメータに持つポアソン分布から乱数を生成
+X = poisson(mu=Y).rvs(size=N)
+
+# scipy.statsの機能で負の二項分布のパラメータ生成
+# X = nbinom(n=n, p=p).rvs(N)
+
+plt.figure(1)
+weights = np.ones_like(X) / float(len(X))
+nbins = np.arange(-0.5, K, 1.0)
+plt.hist(X, nbins, weights=weights)
+rv = nbinom(n=n, p=p)
+t = np.arange(K)
+plt.plot(t, rv.pmf(t), 'r-', lw=2)
+plt.xlim((0, K))
+plt.savefig('figure/kongou.png',bbox_inches='tight')
+```
+![](figure/kongou.png)
+
+# 受理・棄却法
+別名、棄却サンプリング（rejection sampling）による乱数生成  
+この方法を使うと事実上あらゆる分布（特定の名前がついていない分布を含めて）から乱数を生成できるようになる。  
+受理・棄却法では目標分布fと提案分布gという二つの分布を使う。
+目標分布fにしたがう乱数を生成するのが最終目的だが、目標分布fの乱数は直接生成できないため代わりに提案分布gの乱数を生成し、
+ある条件を満たす場合だけ生成した乱数を目標分布fの乱数とみなすというアプローチが受理・棄却法。条件を満たさない乱数は単に捨てられる。
+
+このとき、目標分布fと提案分布gの関係にはいくつか仮定がある。
+
+- 目標分布fにしたがう乱数は直接生成できない
+- 逆に提案分布gにしたがう乱数は生成できる
+- 目標分布fと提案分布gの確率密度関数は既知
+- すべてのxについて$f(x)\leq Mg(x)$となるMが存在する
+
+最後の条件は少しわかりにくいが、目標分布が提案分布をM倍した分布にすっぽり覆われていることを意味する。去年やって理解しているので、これ以上深追いしない  
+
+アルゴリズム：受理・棄却法
+以下の手順で生成した乱数 X は目標分布fにしたがう乱数となる。
+
+- 提案分布gにしたがう乱数Yを生成する
+- [0,1] の一様乱数Uを生成する
+- $UMg(Y)\leq f(Y)$であればYをXとして受理
+- そうでなければYを棄却し、1に戻る
+
+
+```{r}
+Nsim <- 2500
+a <- 2.7;b <- 6.3
+M <- 2.67
+u <- runif(Nsim, max = M)
+y <- runif(Nsim)
+x <- y[u < dbeta(y,a,b)]
+ggplot(data = rbind(data.frame(num=0,x),data.frame(num=1,x=y)),aes(x=x,colour=factor(num))) + geom_density() + xlim(x=c(0,1))
+```
+
+
+```{python}
+# ベータ乱数を受理・棄却法で生成
+# 目標分布（ここではベータ分布）のpdfは既知とする
+# 提案分布として一様分布を使用
+
+import numpy as np
+import matplotlib.pyplot as plt
+import scipy.optimize
+from scipy.stats import uniform, beta
+
+np.random.seed()
+
+# 目標分布f
+f = beta(a=2.7, b=6.3).pdf
+
+# 提案分布g
+# 提案分布から乱数生成するためにgvも保持
+gv = uniform
+g = gv.pdf
+
+# 分布の上限を指定する定数Mを設定
+# ベータ分布のpdfの上限値を指定すればベータ分布をすべて覆える
+# 最大値を求めるためにベータ分布のpdfにマイナスをつけて
+# 最小値問題に帰着させる
+xopt = scipy.optimize.fmin(lambda x: -f(x), 0.0, disp=False)
+M = f(xopt)[0]
+
+# 受理・棄却法
+Nsim = 100000
+
+# 提案分布gからの乱数Yを生成
+Y = gv.rvs(size=Nsim)
+
+# 一様乱数UをNsim個生成
+U = uniform.rvs(size=Nsim)
+
+# Yから受理の条件を満たすサンプルXを残して残りを棄却
+X = Y[U <= f(Y) / (M * g(Y))]
+
+# 目標分布を描画
+x = np.linspace(0.0, 1.0, 1000)
+y = f(x)
+plt.plot(x, y, 'r-', lw=2)
+
+# 提案分布（一様分布）を描画
+y = M * uniform.pdf(x)
+plt.plot(x, y, 'g-', lw=2)
+
+# 受理した乱数の分布を描画
+plt.hist(X, bins=50, normed=True)
+
+plt.savefig('figure/kikyaku.png',bbox_inches='tight')
+```
+![](figure/kikyaku.png)
+
+
+
+
