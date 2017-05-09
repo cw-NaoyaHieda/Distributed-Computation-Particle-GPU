@@ -1,0 +1,83 @@
+---
+title: "Intoroducing Monte Carlo Methods with R   (Part2  Monte Carlo integration)"
+author: "Naoya Hieda"
+date: "2017年5月9日"
+output:
+  html_document:
+    css: styles.css
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,warning = FALSE,message = FALSE)
+library(ggplot2)
+library(reshape2)
+library(dplyr)
+library(MASS)
+theme_set(theme_bw())
+```
+
+ParticleFilterに到達する前の重点サンプリングやPMCMC(Particle Marcoh chain monte carlo)のもとになっているMCMCの理論について  
+いろいろと怪しい部分があったのでまとめる。  
+このMarkdownは主に三章のモンテカルロ積分関係について
+
+## 参考文献
+
+[Rによるモンテカルロ法入門](https://pub.maruzen.co.jp/book_magazine/book_data/search/9784621065273.html)  
+[人工知能に関する断創録](http://aidiary.hatenablog.com/entry/20140620/1403272044)
+
+Rにもともとarea関数とintegrate関数が存在する。ただし、area()は積分で無限の範囲を扱えないし、integrateも安定性に乏しい  
+実験として以下の積分について、integrate関数と実際の値を比較してみる(下記を積分すると$\Gamma$の対数
+$$
+\int_{0}^{\infty} x^{\lambda-1}exp(-x)dx
+$$
+
+```{r}
+ch <- function(la){
+  integrate(function(x) {x^{la-1}*exp(-x)}, 0, Inf)$val
+}
+plot_d <- data.frame(x = lgamma(seq(0.01,10,le=100)),y = log(apply(as.matrix(seq(0.01,10,le=100)), 1, ch)))
+ggplot(plot_d,aes(x=x,y=y))+geom_point()
+```
+この場合は、結構きれい
+
+integrate関数のような数値積分方法で困難なのは、被積分関数にいおいて重要な範囲を見逃しやすいこと。
+これに対してシミュレーションでは、積分にかかわる確率密度の情報を活用することで、この範囲に絞った適用が可能。  
+
+位置パラメータ$\theta=350$とするコーシー分布の乱数10個をサンプルとして検討する。平坦な事前分布を仮定するとサンプルの(疑似)周辺分布が以下のようになる
+$$
+m(x) = \int_{-\infty}^{\infty}\prod_{i=1}^{10} \frac{1}{\pi}\frac{1}{1+(x_i-\theta)^2}d\theta
+$$
+しかし、integrateは誤った数値を返す  
+下記は誤差評価を確認した後、area関数との積分結果の対数尤度比較
+```{r}
+cac=rcauchy(10)+350
+lik=function(the){
+  u=dcauchy(cac[1]-the)
+  for(i in 2:10)
+    u=u*dcauchy(cac[i]-the)
+    return(u)
+}
+
+print(integrate(lik,-Inf,Inf))
+
+print(integrate(lik,200,400))
+
+cac=rcauchy(10)
+
+nin=function(a){integrate(lik,-a,a)$val}
+nan=function(a){area(lik,-a,a)}
+x=seq(1,10^3,le=10^4)
+y=log(apply(as.matrix(x),1,nin))
+z=log(apply(as.matrix(x),1,nan))
+plot(x,y,type="l",ylim=range(cbind(y,z)),lwd=2)
+ggplot()+geom_line(data = data.frame(x,y),mapping = aes(x=x,y=y))+geom_line(data = data.frame(x,z),mapping = aes(x=x,y=z),colour='blue',linetype=2)
+```
+
+## 古典的なモンテカルロ計算
+シミュレーションを実際の問題に適用する前に、こうした応用が適正であることを再確認しておく。
+一般に以下の積分をどのように評価するのかということが問題になる。
+$$
+E_{f}[h(X)]
+$$
+
+
