@@ -1,0 +1,213 @@
+---
+title: "Intoroducing Monte Carlo Methods with R   (Part1 Sampling)"
+author: "Naoya Hieda"
+date: "2017年5月9日"
+output:
+  html_document:
+    css: styles.css
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,warning = FALSE,message = FALSE)
+library(ggplot2)
+library(reshape2)
+library(dplyr)
+theme_set(theme_bw())
+```
+
+ParticleFilterに到達する前の重点サンプリングやPMCMC(Particle Marcoh chain monte carlo)のもとになっているMCMCの理論について  
+いろいろと怪しい部分があったのでまとめる。  
+このMarkdownは主に二章のサンプリング関係について
+
+## 参考文献
+
+[Rによるモンテカルロ法入門](https://pub.maruzen.co.jp/book_magazine/book_data/search/9784621065273.html)  
+[人工知能に関する断創録](http://aidiary.hatenablog.com/entry/20140620/1403272044)
+
+# 逆変換法
+乱数を得る手法の一つ。
+[0,1]区間の一様分布から得られた乱数（一様乱数）を変換することで任意の確率分布に従う乱数を得る手法。
+このとき必要となるのは変換先の確率分布の累積分布関数
+(cumulative distribution function:cdf)  
+逆変換法は、累積分布関数$F_X$の逆関数$F^{−1}_X$を使って一様乱数を変換する。
+下の例は、一様乱数を指数分布の乱数に変換した例。
+
+指数分布の累積分布関数の逆関数が
+$$
+\displaystyle x = - \frac{1}{\lambda} \log (1 - u)
+$$
+```{r}
+Nsim <- 10^4
+U <- runif(Nsim)
+X <- -log(U)
+Y = rexp(Nsim)
+plot_d <- data.frame(Uniform=X,R=Y)
+ggplot(plot_d %>% melt,aes(x=value))+geom_histogram(aes(fill=variable))+facet_grid(.~variable)
+```
+```{python}
+# 逆変換法で一様分布から指数分布を得る
+import numpy as np
+import matplotlib.pyplot as plt
+import scipy.stats
+
+nbins = 50
+
+# 指数分布のパラメータ（scale = 1/lambda）
+scale = 1.0
+
+# 逆変換法で一様乱数から指数分布の乱数を得る
+np.random.seed()
+N = 100000
+U = scipy.stats.uniform(loc=0.0, scale=1.0).rvs(size=N)
+
+# 指数分布の累積分布関数の逆関数を用いて変換
+X1 = - scale * np.log(1 - U)
+
+# 生成した元の一様乱数を描画
+plt.figure(1)
+plt.hist(U, nbins, normed=True)
+plt.savefig('figure/itiyou.png', bbox_inches='tight')
+# 変換した指数分布の乱数と理想的なPDFを描画
+plt.figure(2)
+rv = scipy.stats.expon(scale=scale)
+plt.hist(X1, nbins, normed=True)
+
+x = np.linspace(rv.ppf(0.01), rv.ppf(0.99), 1000)
+y = rv.pdf(x)
+plt.plot(x, y, 'r-', lw=2)
+plt.xlim((rv.ppf(0.01), rv.ppf(0.99)))
+
+#plt.show()
+plt.savefig('figure/gyaku.png', bbox_inches='tight')
+```
+![output](figure/itiyou.png)
+![output](figure/gyaku.png)
+
+## 証明
+$U$ が一様分布に従うことを式で表す$:P(U\leq u)=u$  
+（ただし $0\leq u\leq 1$）
+
+ここで，$U\leq u\iff F^{-1}(U)\leq F^{-1}(u)$  
+に注意すると上式は$P(F^{-1}(U)\leq F^{-1}(u))=u$となる。
+
+さらに，$F^{-1}(u)=x$ と置くと，
+$P(F^{-1}(U)\leq x)=F(x)$
+
+これは確率変数$F^{-1}(U)$が，累積分布関数が$F(x)$であるような確率分布に従うことを表している。
+
+# 一般変換法
+密度関数fの分布が、シミュレーションしやすい別の分布に比較的簡単にリンクする場合、
+この関係を利用してfの分布から変数をシミュレーションするアルゴリズムを構築できる。
+
+
+指数分布に特定の変換を施すことで生成できる標準的な分布としてカイ二乗分布、ガンマ分布、ベータ分布などがある。  
+ここでは自由度6のカイ二乗分布を生成する。カイ二乗分布の従う分布が以下のように導ける。
+$$
+\displaystyle Y = 2 \sum_{j=1}^\nu X_j \sim \chi_{2 \nu}^2
+$$
+
+```{r}
+U <- runif(3*10^4)
+U <- matrix(data = U,nrow = 3)
+X <- -log(U)
+X <- 2*apply(X,2,sum)
+Y <- rchisq(3*10^4,df=6)
+plot_d <- data.frame(Uniform=X,R=Y)
+ggplot(plot_d %>% melt,aes(x=value))+geom_histogram(aes(fill=variable))+facet_grid(.~variable)
+```
+
+
+```{python}
+# カイ二乗分布に従う乱数を指数乱数から生成
+import numpy as np
+from scipy.stats import uniform, chi2
+import matplotlib.pyplot as plt
+
+nbins = 50
+
+# カイ二乗分布のパラメータ（自由度: degrees of freedom）
+# この方法では偶数のみ
+df = 6
+if df % 2 != 0:
+    print(u"ERROR: 自由度は偶数のみ")
+    exit(0)
+
+nu = int(df / 2)
+
+# 逆変換法で一様乱数を指数乱数に変換
+# 1つのカイ二乗乱数を得るためにはnu個の指数乱数が必要なので
+# 行列化して和を取りやすくする
+np.random.seed()
+N = 100000
+rv = uniform(loc=0.0, scale=1.0)
+U = rv.rvs(nu * N).reshape((nu, -1))
+X = - np.log(1 - U)
+
+# 指数乱数からカイ二乗乱数を得る
+# 各列を足しあわせて1つのカイ二乗乱数を得る
+Y = 2 * np.sum(X, axis=0)
+
+# 変換したカイ二乗分布の乱数とpdfを描画
+plt.figure(1)
+plt.hist(Y, nbins, normed=True)
+rv = chi2(df=df)
+x = np.linspace(rv.ppf(0.01), rv.ppf(0.99), 1000)
+y = rv.pdf(x)
+plt.plot(x, y, 'r-', lw=2)
+plt.xlim((rv.ppf(0.01), rv.ppf(0.99)))
+
+plt.savefig('figure/ippan.png', bbox_inches='tight')
+```
+![](figure/ippan.png)
+
+# Box-Muller法
+2つの一様乱数から標準正規分布$N(0,1)$に従う2つの乱数を生成するアルゴリズム。$U_1$と$U_2$が独立同分布の$U_{[0,1]}$とすると、次の2つの変数
+$$
+X_1 = \sqrt{-2 \log (U_1)} \cos (2 \pi U_2)\\
+X_2 = \sqrt{-2 \log (U_1)} \sin (2 \pi U_2)
+$$
+は独立同分布の$N_{[0,1]}$になる。
+
+```{python}
+# Box-Mullerアルゴリズムを用いて標準正規分布N(0,1)に従う乱数を生成
+import numpy as np
+from scipy.stats import uniform, norm
+import matplotlib.pyplot as plt
+
+# 独立した一様分布からそれぞれ一様乱数を生成
+np.random.seed()
+N = 100000
+rv1 = uniform(loc=0.0, scale=1.0)
+rv2 = uniform(loc=0.0, scale=1.0)
+U1 = rv1.rvs(N)
+U2 = rv2.rvs(N)
+
+# Box-Mullerアルゴリズムで正規分布に従う乱数に変換
+# 2つの一様分布から2つの標準正規分布が得られる
+X1 = np.sqrt(-2 * np.log(U1)) * np.cos(2 * np.pi * U2)
+X2 = np.sqrt(-2 * np.log(U1)) * np.sin(2 * np.pi * U2)
+
+# 変換した乱数の分布と標準正規分布の真のpdfを描画
+rv = norm(loc=0, scale=1)
+
+# X1の分布
+plt.subplot(2, 1, 1)
+nbins = 50
+plt.hist(X1, nbins, normed=True)
+x = np.linspace(rv.ppf(0.01), rv.ppf(0.99), 1000)
+y = rv.pdf(x)
+plt.plot(x, y, 'r-', lw=2)
+plt.xlim((rv.ppf(0.01), rv.ppf(0.99)))
+
+# X2の分布
+plt.subplot(2, 1, 2)
+plt.hist(X2, nbins, normed=True)
+x = np.linspace(rv.ppf(0.01), rv.ppf(0.99), 1000)
+y = rv.pdf(x)
+plt.plot(x, y, 'r-', lw=2)
+plt.xlim((rv.ppf(0.01), rv.ppf(0.99)))
+
+plt.savefig('figure/box.png', bbox_inches='tight')
+```
+
+![](figure/box.png)
