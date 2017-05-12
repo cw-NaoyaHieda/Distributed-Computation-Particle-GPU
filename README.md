@@ -1,0 +1,5 @@
+# Distributed-Computation-Particle-GPU
+GPUにParticlefilterを適用する関係
+
+- ParticelFilter_on_GCP_Realtimecontrol　論文の和訳
+- Intoroducing_Montecarlo_Methods_with_R Rによるモンテカルロ法入門の再現
