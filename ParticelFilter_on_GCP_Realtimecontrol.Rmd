@@ -97,5 +97,5 @@ Particlefiterは、GPUアーキテクチャなどを利用して効率的に動�
 
 # Distributed Computation Particle Filters
 推定する計算を分散することは二つの理由で、研究者に注目されている。  
-一つは、
+一つは
 
