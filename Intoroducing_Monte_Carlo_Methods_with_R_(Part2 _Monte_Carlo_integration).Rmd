@@ -77,7 +77,104 @@ ggplot()+geom_line(data = data.frame(x,y),mapping = aes(x=x,y=y))+geom_line(data
 シミュレーションを実際の問題に適用する前に、こうした応用が適正であることを再確認しておく。
 一般に以下の積分をどのように評価するのかということが問題になる。
 $$
-E_{f}[h(X)]
+E_{f}[h(X)] = \int_{\chi}h(x)f(x)dx
 $$
+ここで$\chi$は乱数Xの値の集合で、これは通常の密度fの台に等しくなる。  
+これを近似するモンテカルロ法の原理は、密度fからサンプル$(X_1,\dots,X_m)$を生成して、近似として以下の経験平均を掲示すること
+$$
+\bar{h}_m = \frac{1}{m}\sum_{j=1}^m h(x_j)
+$$
+
+$\bar{h}_m$は大数の強法則により、ほぼ間違いなく$E_f(h(X))$に収束する。よって、Rならmeanなどを計算することで求まる。
+さらに、$h^2(X)$が$f$のもとで有限の期待値をもつ場合、$\bar{h}_m$の収束時間を評価することが可能。
+収束時間は$O(\sqrt{m})$となり、近似の漸近的な分散は以下となるため。
+$$
+var(\bar{h}_m)=\frac{1}{m}\int_{\chi}(h(x)-E_f[h(X)])^2f(x)dx
+$$
+これは、サンプル$(X_1,\dots,X_m)$からも以下のように推定できる。
+$$
+v_m = \frac{1}{m^2}\sum_{j=1}^{m}[h(x_j)-\bar{h}_m]^2
+$$
+さらには中心極限定理によってmが十分大きいのであれば、いかが近似的に$N(0,1)$の正規分布をする変数となる。
+$$
+\frac{\bar{h}_m-E_f[h(X)]}{\sqrt{v_m}}
+$$
+
+
+次の仮の関数で試してみる
+$$
+h(x)= [cos(50x)+sin(20x)]^2
+$$
+上が実際にこの曲線が描く概形で、下がこれの近似式の収束をしめしている
+```{r}
+h <- function(x){(cos(50 * x) + sin(20 * x))^2}
+ggplot()+geom_line(mapping=aes(x= 0:100/100,y =h(0:100/100)))
+integrate(h,0,1)
+x <- h(runif(10^4))
+estint <- cumsum(x)/(1:10^4)
+esterr <- sqrt(cumsum((x - estint)^2))/(1:10^4)
+ggplot(data.frame(estint), aes(x=1:10^4,y=estint))+geom_line()+ylim(mean(x)+20*c(-esterr[10^4],esterr[10^4]))+
+  geom_line(mapping = aes(x=1:10^4,y=estint+2*esterr,color="gold"))+geom_line(mapping=aes(x=1:10^4,y=estint-2*esterr,color="gold"))
+```
+
+### 練習問題 3.1
+正規・コーシーベイズ推定量
+$$
+\delta(x) = \int_{\infty}^{\infty} \frac{\theta}{1+\theta^2} e^{-(x-\theta)/2}d\theta/\int_{\infty}^{\infty} \frac{1}{1+\theta^2} e^{-(x-\theta)/2}d\theta
+$$
+- 被積分関数をプロットし、コーシー・シミュレーションにもとづくモンテカルロ積分を計算する。
+```{r}
+delta_numer <- function(theta){theta/(1+theta^2)*exp(-(x-theta)^2/2)}
+delta_denom <- function(theta){1/(1+theta^2)*exp(-(x-theta)^2/2)}
+par(mfrow=c(3,2))
+for(x in c(0,2,4)){
+  curve(delta_numer,from=-10,to=10,main=paste("numerator : x=",x))
+  curve(delta_denom,from=-10,to=10,main=paste("denominator : x=",x))
+} 
+
+for(x in c(0,2,4)){
+  #正規分布から乱数を発生させて、コーシーで評価
+  N <-10^5
+  norm <- rnorm(N,x)
+  cauchy <- dcauchy(norm)
+  print(mean(norm*cauchy)/mean(cauchy))
+  #その逆　結果はほぼ同じ
+  cauchy <- rcauchy(N)
+  norm <- dnorm(cauchy,x)
+  print(mean(cauchy*norm)/mean(norm))
+} 
+```
+- 収束を推定値の標準誤差でモニタリングする。95\%の信頼幅を小数点3位の精度で求める
+```{r}
+estint <- cumsum(cauchy*norm)/cumsum(norm)
+esterr <- sqrt(cumsum((cauchy-estint)^2)/c(1:length(cauchy))^2)
+plot(esterr,type='l')
+```
+
+
+
+# 本題その1
+# 重点サンプリング
+上の近似の評価は、たいていの場合は最適ではない
+## 参照量を任意に変更
+重点サンプリング法は、期待値$E_f[h(x)]=\int_{\chi}h(x)f(x)dx$の代替え式に基づく。ある任意の密度gで$h\times f$がゼロとは異なり、真に正ならば、次のように書き換えることができる
+$$
+E_f[h(X)]=\int_{\chi}h(x)\frac{f(x)}{g(x)}g(x)dx=E_g[\frac{h(X)f(X)}{g(X)}]
+$$
+これは密度gの下での期待値となる。この重点サンプリング基本恒等式は、次の推定量の利用を保証する。
+$$
+\frac{1}{n}\sum_{j=1}^{m}\frac{f(X_j)}{g(X_j)}h(X_j)\rightarrow E_f[h(X)]
+$$
+これはgから生成したサンプルに基づく。このように期待値をgの下での期待値として書くことができるので、分布gの選択がなんであれ、通常のモンテカルロ推定量
+$\bar{h}$が収束するのと同じように収束する。
+
+### 練習問題 3.4
+fを正規pdfとし、$h(x)をexp(-(x-3)^2)+exp(-(x-6)^2/2)$として期待値$E[h(X)]$の計算を検討する
+
+- $E_f[h(X)]$が閉じた式で計算できることを示し、その値を導く。
+
+
+
+
 
 
