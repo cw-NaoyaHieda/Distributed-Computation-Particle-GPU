@@ -23,7 +23,8 @@ ParticleFilterに到達する前の重点サンプリングやPMCMC(Particle Mar
 ## 参考文献
 
 [Rによるモンテカルロ法入門](https://pub.maruzen.co.jp/book_magazine/book_data/search/9784621065273.html)  
-[人工知能に関する断創録](http://aidiary.hatenablog.com/entry/20140620/1403272044)
+[人工知能に関する断創録](http://aidiary.hatenablog.com/entry/20140620/1403272044)  
+[Wolfeyes Bioinformatics beta](http://yagays.github.io/blog/2012/10/20/archive-introducing-monte-carlo-methods-with-r/)
 
 Rにもともとarea関数とintegrate関数が存在する。ただし、area()は積分で無限の範囲を扱えないし、integrateも安定性に乏しい  
 実験として以下の積分について、integrate関数と実際の値を比較してみる(下記を積分すると$\Gamma$の対数
@@ -173,8 +174,101 @@ fを正規pdfとし、$h(x)をexp(-(x-3)^2)+exp(-(x-6)^2/2)$として期待値$E
 
 - $E_f[h(X)]$が閉じた式で計算できることを示し、その値を導く。
 
+- 正規分布N(0,1)に基づくサンプルサイズ$10^3$の通常のモンテカルロ近似を構成し、誤差を評価する。
+```{r}
+N <- 10^3
+h <- function(x){exp(-(x-3)^2/2)+exp(-(x-6)^2/2)}
+sample <- rnorm(N)
+n_mc_est <- cumsum(h(sample))/c(1:length(sample))
+n_mc_err <- sqrt(cumsum((sample - n_mc_est)^2))/(1:length(sample))
+n_mc <- data.frame(est = n_mc_est,error_max = n_mc_est + 2 * n_mc_err,error_min = n_mc_est - 2 * n_mc_err)
+ggplot(n_mc,aes(x=1:length(sample),y=est))+geom_line()+
+  geom_line(mapping = aes(x=1:length(sample),y=error_max),colour='gold')+
+  geom_line(mapping = aes(x=1:length(sample),y=error_min),colour='gold')+
+  xlab('sample size')
+n_mc_est[N]
+```
+
+- 一様分布u(-8,-1)に対応する重点関数gにもとづくサンプルサイズ$10^3$の重点サンプリング近似と比較する。(これは収束しない　範囲を網羅してない)  
+・・・そのわりには収束してるっぽい
+```{r}
+sample_g <- runif(N,-8,-1)
+g_mc_est <- h(sample_g) * dnorm(sample_g) / dunif(sample_g,-8,-1) /c(1:length(sample_g))
+g_mc_err <- sqrt(cumsum((h(sample_g) * dnorm(sample_g) / dunif(sample_g,-8,-1) - g_mc_est)^2))/c(1:length(sample_g))
+g_mc <- data.frame(est = g_mc_est,error_max = g_mc_est + 2 * g_mc_err,error_min = g_mc_est - 2 * g_mc_err)
+ggplot(g_mc,aes(x=1:length(sample),y=est))+geom_line(colour='red')+
+  geom_line(mapping = aes(x=1:length(sample),y=error_max),colour='gold')+
+  geom_line(mapping = aes(x=1:length(sample),y=error_min),colour='gold')+
+  xlab('sample size')
+```
+
+```{r}
+sample_g <- runif(N,-2,10)
+g_mc_est <- h(sample_g) * dnorm(sample_g) / dunif(sample_g,-2,10) /c(1:length(sample_g))
+g_mc_err <- sqrt(cumsum((h(sample_g) * dnorm(sample_g) / dunif(sample_g,-2,10) - g_mc_est)^2))/c(1:length(sample_g))
+g_mc <- data.frame(est = g_mc_est,error_max = g_mc_est + 2 * g_mc_err,error_min = g_mc_est - 2 * g_mc_err)
+ggplot(g_mc,aes(x=1:length(sample),y=est))+geom_line(colour='red')+
+  geom_line(mapping = aes(x=1:length(sample),y=error_max),colour='gold')+
+  geom_line(mapping = aes(x=1:length(sample),y=error_min),colour='gold')+
+  xlab('sample size')
+
+g_mc_est[N]
+```
 
 
+通常のモンテカルロ合計によって裾の確率を近似する方法は、裾の外れに近づくにつれ破綻する。たとえば、$Z\sim N(0,1)$でP(Z > 4.5)の確率を知りたいとする。  
+```{r}
+pnorm(-4.5, log=T)
+pnorm(-4.5)
+```
+約300万回の反復で1回しか起きない。  
+きわめて稀な事象の確率を知ろうとしたとき、$f$からの単純なシミュレーションでは、安定した解をえるのに膨大なシミュレーションが必要になる。しかし、重点サンプリングのおかげで、精度を大幅に改善することができ、したがってシミュレーション回数を数桁分減らすことができる。  
+例えば台が$(4.5,\infty)$に制約された分布を例にする。ここではモンテカルロ推定量の余分で不要な分散がゼロのシミュレーション(つまり $x \leq 4.5$の範囲)により消えている。gを4.5で切り詰めた指数分布の密度とするのが自然
+
+切断指数分布（truncated exponential distribution）という分布、今は指数分布から4.5以上の区間を取り出してきて、その区間の面積が1になるように再調整した分布
+$$
+g(y)=e^{-y}/\int_{4.5}^{\infty}e^{-x}dx=e^{-(y-4.5)}
+$$
+すると対応する重点サンプリングによる裾の確率の推定量が以下のように与えられる
+$$
+\frac{1}{m}\sum_{i=1}^{m}\frac{f(Y^{(i)})}{g(Y^{(i)})}=\frac{1}{m}\sum_{i=1}^{m}\frac{e^{-Y_i^2-4.5}}{\sqrt{2\pi}}
+$$
+```{r}
+Nsim <- 10^3
+y <- rexp(Nsim) + 4.5
+weit =dnorm(y)/dexp(y-4.5)
+plot(cumsum(weit)/1:Nsim,type="l")
+abline(a=pnorm(-4.5),b=0,col="red")
+```
+かなり早い段階で収束している。
+
+### 練習問題3.5  
+上の例で指数分布が切り詰められると、裾の確率近似の分散に影響することを調べる
+```{r}
+par(mfrow=c(2,2))
+for(lambda in c(1, 5, 10, 20)){
+  Nsim <- 10^4
+  y <- rexp(Nsim)/lambda+4.5
+  weit <- dnorm(y)/dexp(y-4.5, lambda)
+  estint <- cumsum(weit)/1:Nsim
+  esterr <- sqrt(cumsum((weit-estint)^2))/(1:Nsim)
+  plot(estint, xlab="Mean and error range", ylab="prob", type="l", main=paste("lambda = ",lambda))
+  lines(estint+2*esterr, col="gold", lwd=2)
+  lines(estint-2*esterr, col="gold", lwd=2)
+  abline(h=pnorm(-4.5), col="red")
+}
+```
+
+たぶん、去年の研究の時も、VaRの計算はgの範囲を狭めてサンプリングによって求めるべきだった。
 
 
+ベイズの枠組みにもとづいて、ベータ分布$Be(\alpha,\beta)$からの観測地xを考える。
+$$
+x\sim \frac{\Gamma(\alpha + \beta)}{\Gamma(\alpha)\Gamma(\beta)}x^{\alpha-1}(1-x)^{\beta-1}I\hspace{-.1em}I
+$$
+$(\alpha,\beta)$には以下の形式の共役事前分布族がある。  
+$$
+\pi(\alpha,\beta)\propto \left\{\frac{\Gamma(\alpha + \beta)}{\Gamma(\alpha)\Gamma(\beta)} \right\}^{\lambda}x_0^{\alpha}y_0^{\beta}
+$$
+ここで$\lambda,x_0,y_0$はハイパーパラメータ。この際、事後分布は以下に等しい
 
