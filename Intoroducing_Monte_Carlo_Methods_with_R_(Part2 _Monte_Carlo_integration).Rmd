@@ -13,6 +13,7 @@ library(ggplot2)
 library(reshape2)
 library(dplyr)
 library(MASS)
+source('script/DR_density.r')
 theme_set(theme_bw())
 ```
 
@@ -290,5 +291,127 @@ image(aa,bb,post,xlab=expression(alpha),ylab="")
 contour(aa,bb,post,add=T)
 
 ```
+対($\alpha,\beta$)には正規ないしスチューデントのt分布が適切そう  
+スチューデント$T(3,\mu,\sum)$分布で$\mu=(50,45)$とし
+$$
+\Sigma=
+\begin{matrix}
+220 & 190 \\
+190 & 180 
+\end{matrix}
+$$
+の場合でシミュレーションした結果、次のように適切な当てはめが得られる。この共分散行列は著者が試行錯誤して得られたもの
+
+```{r}
+x <- matrix(rt(2*10^4,3),ncol=2)
+E <- matrix(c(220,190,190,180),ncol=2)
+image(aa,bb,post,xlab=expression(alpha),ylab='')
+y <- t(t(chol(E)) %*% t(x)+c(50,45))
+points(y, cex=0.6,pch=19)
+```
+
+ここで共分散行列をEとするために、t(cho(E))を使っていることに注意。  
+もしも対象となっている量が、ベイズにおけるモデル比較のように周辺尤度であるならば
+$$
+m(x)=\int_{R^2_+}f(x|\alpha,\beta)\pi(\alpha,\beta)d\alpha d\beta\\
+=\frac{\int_{R_+^2}\left\{\frac{\Gamma(\alpha+\beta)}{\Gamma(\alpha)\Gamma(\beta)}\right\}^{\lambda+1}[xx_0]^{\alpha}[(1-x)y_0]^{\beta}d\alpha d\beta}{x(1-x)\int_{R^2_+} \left\{\frac{\Gamma(\alpha+\beta)}{\Gamma(\alpha)\Gamma(\beta)}\right\}^{\lambda}x_0^{\alpha}y_0^{\beta}d\alpha d\beta}
+$$
+
+二つの積分を近似する必要があるが、どちらにも同じtサンプルを利用することができる。事前分布の曲面への当てはめがどちらも同じように適切なため。この近似は以下の様になる。
+
+$$
+\hat{m}(x)
+=\frac{\sum_{i=1}^{n}\left\{\frac{\Gamma(\alpha_i+\beta_i)}{\Gamma(\alpha_i)\Gamma(\beta_i)}\right\}^{\lambda+1}[xx_0]^{\alpha_i}[(1-x)y_0]^{\beta_i}/g(\alpha_i,\beta_i)}
+{\sum_{i=1}^{n} \left\{\frac{\Gamma(\alpha_i+\beta_i)}{\Gamma(\alpha_i)\Gamma(\beta_i)}\right\}^{\lambda}x_0^{\alpha_i}y_0^{\beta_i}/g(\alpha_i,\beta_i)}
+$$
+???分母のx(1-x)どこいった??  
+ここで$(\alpha_i,\beta_i)_{i\leq i \leq n}$はgからのnの独立同分布の実現値。
+
+```{r}
+ine <- apply(y, 1, min)
+y <- y[ine > 0,]
+x <- x[ine > 0,]
+normx <- sqrt(x[,1]^2 + x[,2]^2)
+f <- function(a) exp(2*(lgamma(a[,1] + a[,2]) - lgamma(a[,1]) - lgamma(a[,2])) + a[,1]*log(0.3) + a[,2]*log(0.2))
+h <- function(a) exp(1*(lgamma(a[,1] + a[,2]) - lgamma(a[,1]) - lgamma(a[,2])) + a[,1]*log(0.5) + a[,2]*log(0.5))
+den <- dt(normx, 3)
+sim <- mean(f(y)/den)/mean(h(y)/den)
+sim
+```
+ここでのシミレーションによる周辺尤度の値は`r sim`となった。同様に、パラメータ$\alpha,\beta$の事後期待値も以下のように得られる。
+```{r}
+mean(y[,1]*f(y)/den)/mean(f(y)/den)
+```
+
+```{r}
+mean(y[,2]*f(y)/den)/mean(f(y)/den)
+```
+
+## サンプリング重点サンプリング
+
+複雑な分布をシミュレーションする代替え手法  
+この手法では、gからシミュレーションしたサンプルとその重点重み$f(X_i)/g(X_i)$を生成する。このサンプルを多項リサンプリングによってリサイクルし、(ほぼ)fからのサンプルを得ることができる。
+
+実際、重み付けされた母集団$\left\{ X_1,\dots,X_n \right\}$から、確率f(X_i)/ng(X_i)でX_iを復元抽出できるとすれば、以下の分布に従う$X^{\star}$をえられる。
+
+$$
+Pr(X^{\star}\in A) = \Sigma_{i=1}^{n}Pr(X^{\star} \in A かつ X^{\star} = X_i)\\
+=\int_A \frac{f(x)}{g(x)}g(x)dx=\int_Af(x)dx
+$$
+するとfからの正確なシミュレーションが生成される。残念ながら確率$f(X_i)/ng(X_i)$の和は1にならない。そのため以下のように再正規化する必要がある。  
+$$
+w_i=\frac{1}{n}\left\{f(X_i)/g(X_i) \right\}/\frac{1}{n}\sum_{j=1}^n \{f(X_j)/g(X_j)\}
+$$
+
+ここで、分母はほぼ確実に1に収束するが、リサンプリングされた値の分布にバイアスが生じる。  
+しかしながら、サンプルサイズが大きい場合、このバイアスは無視できる程度であり、多項リサンプリングを使ってfからのサンプルを近似できる。  
+
+### 練習問題 3.6
+重点サンプル$(X_i,f(X_i)/g(X_i))$を所与とするとき、$w_i$がポアソン分布$w_i\sim P(f(X_i)/g(X_i))$に従うのならば、推定量
+$$
+\frac{1}{n}\sum_{i=1}^{n}w_i h(x_i)
+$$
+にバイアスがないことを示す。またこのサンプリングの仕組みによるサンプルが、fの周辺分布であることを導く。  
+とりあえず保留
+
+重点サンプリング推定量で再正規化重みを使うと、**自己正規化重点サンプリング推定量**が生成される。
+$$
+\sum_{i=1}^n h(X_i)f(X_i)/g(X_i)\Big/\sum_{j=1}^n f(X_i)/g(X_i)
+$$
+これはfかgに正規化定数がかけている場合にも利用できる。
+
+##### 注意
+重点重みは、目標密度に対するシミュレーション・サンプルの妥当性を**相対的**に評価するにすぎない。つまり、生成したXのなかで、ほかの値よりはそれらしいというだけで、実際の分布からサンプリングできていることを絶対的に評価はしていない。そりゃそうだ
+
+先ほどの、ベータ分布からの観測値についての周辺分布の近似の妥当性(重点サンプリングの回の収束性)については、以下のようにグラフを利用していく
+```{r}
+par(mfrow=c(2,2),mar=c(4,4,2,1))
+weit <- (f(y)/den/mean(h(y)/den))
+image(aa, bb, post, xlab=expression(alpha),
+      ylab = expression(beta))
+points(y[sample(1:length(weit), 10^3, rep=T, pro=weit), ],
+       cex = 0.6, pch=19)
+boxplot(weit, ylab="importance weight")
+plot(cumsum(weit)/(1:length(weit)), type='l',
+     xlab = "simulations",ylab = "marginal likelihood")
+boot <- matrix(0, ncol=length(weit), nrow = 100)
+for (t in 1:100) boot[t,] <- cumsum(sample(weit))/(1:length(weit))
+uppa <- apply(boot, 2, quantile, 0.95)
+lowa <- apply(boot, 2, quantile, 0.05)
+polygon(c(1:length(weit), length(weit):1), c(uppa,rev(lowa)),
+        col = 'gold')
+lines(cumsum(weit)/(1:length(weit)) , lwd=2)
+plot(cumsum(weit)^2/cumsum(weit^2), type='l',
+     xlab='simulations',ylab='Effective sample size', lwd = 2)
+```
+
+左上の図は、重点重み$\pi(\alpha_i,\beta_i|x)/g(\alpha_i,\beta_i)$で重み付けしたサンプルが、$\pi(\alpha,\beta|x)$からのサンプルをよく表現していることが分かる。リサンプリングした点では、いくつかの点で劣化が認められず、代わりに目標分布の正確なレンジを高い密度でカバーしている。右上の図は重点重みの広がりを表している。他と比べて重みが大きなシミュレーションもあるが、この方法が劣化を招いていることを示唆するほど極端ではない。左下の図はnの増加に対する推定量$\hat{m}(x)$の収束を表現している。ここで系列を囲むグレーの帯域は、推定量の変動をブーストラップによって表現している。右下のパネルの曲線は、重点サンプリングを使った場合の有効サンプルサイズによる有効性の低下を、以下で表現したもの。
+$$
+\left\{\sum_{i=1}^n \pi(\alpha_i,\beta_i|x)/g(\alpha_i,\beta_i)\right\}^2\Big/\sum_{i=1}^{n}\{\pi(\alpha_i,\beta_i|x)/g(\alpha_i,\beta_i)\}^2
+$$
+これは$(\alpha_i,\beta_i)$が事後分布から生成されていればnに等しくなるはず。このプロットでは、生成されたサンプルの有効性は約6\%となる。
+
+
+
 
 
