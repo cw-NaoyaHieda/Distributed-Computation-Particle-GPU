@@ -1,7 +1,7 @@
 ---
 title: "Intoroducing Monte Carlo Methods with R   (Part2  Monte Carlo integration)"
 author: "Naoya Hieda"
-date: "201759･"
+date: "`r format(Sys.time(), '%Y年%m月%d日')`"
 output:
   html_document:
     css: styles.css
@@ -424,6 +424,7 @@ $$
 無限の分散が生じる単純な設定として、目標のコーシー分布C(0,1)に正規重点関数N(0,1)を使う場合を考える。このとき、比$f(x)/g(x)\propto exp(x^2/2)/(1+x^2)$は、xが少しばかり大きくなるだけで重点重みが非常に大きくなるため、激増する。
 
 ```{r}
+set.seed(71000)
 x <- rnorm(10^6)
 wein <- dcauchy(x)/dnorm(x)
 plot(cumsum(wein*(x > 2)*(x < 6))/cumsum(wein), type='l')
