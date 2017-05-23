@@ -158,7 +158,8 @@ plot(esterr,type='l')
 # 本題その1
 # 重点サンプリング
 上の近似の評価は、たいていの場合は最適ではない
-## 参照量を任意に変更
+
+## 3.3.1 参照量を任意に変更
 重点サンプリング法は、期待値$E_f[h(x)]=\int_{\chi}h(x)f(x)dx$の代替え式に基づく。ある任意の密度gで$h\times f$がゼロとは異なり、真に正ならば、次のように書き換えることができる
 $$
 E_f[h(X)]=\int_{\chi}h(x)\frac{f(x)}{g(x)}g(x)dx=E_g[\frac{h(X)f(X)}{g(X)}]
@@ -544,11 +545,26 @@ glm関数による推定値に対応する共分散対角行列と最尤法を�
 ただし、この選択があらゆるケースにおいて有限な分散を保障するものではない。  
 この考えを以下の様に実装してみる。
 ```{r}
+post<-function(x){ dnorm(x[1],0,100) * dnorm(x[1],0,100) * like(x)}
 sim <- cbind(rnorm(10^3, mean=-0.4, sd=0.04),
 rnorm(10^3, mean=0.065, sd=0.005))
 weit <- apply(sim, 1, post)/
   (dnorm(sim[,1], mean=-0.4, sd=0.04) *
    dnorm(sim[,2], mean=0.065, sd=0.005))
+boxplot(weit)
 ```
 
+すると、重点重みが一様ではないことが分かる。  
+防御サンプリングの実装すると
+
+```{r}
+sim <- rbind(sim[1:(0.95)*10^3,],
+cbind(rnorm(0.05*10^3, sd=10),rnorm(0.05*10^3, sd=10)))
+weit <- apply(sim, 1, post)/
+  (0.95*dnorm(sim[,1],m=-0.4,sd=0.081)*
+    dnorm(sim[,2], mean=0.065, sd=0.01) +
+     0.05*dnorm(sim[,1],sd=10)*
+   dnorm(sim[,2], sd=10))
+boxplot(weit)
+```
 
