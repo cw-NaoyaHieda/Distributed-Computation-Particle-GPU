@@ -3,8 +3,11 @@ title: "DefaultRateと重点サンプリング"
 author: "Naoya Hieda"
 date: "`r format(Sys.time(), '%Y年%m月%d日')`"
 output:
-  html_document:
-    css: styles.css
+  pdf_document:
+    latex_engine: lualatex
+documentclass: ltjsarticle
+mainfont: Meiryo
+monofont: Meiryo
 ---
 
 ```{r setup, include=FALSE}
@@ -19,7 +22,9 @@ theme_set(theme_bw())
 ```
 
 # 目的
-重点サンプリングが、デフォルト率の密度関数の推定においてどれだけ有能か確認する。
+- 重点サンプリングが、デフォルト率の密度関数の推定においてどれだけ有能か確認する。
+- デフォルト率の推定における重点関数(提案分布)の選択について考察する
+- 同様に、サンプル数(Particle数)についても考察する
 
 # 方法 
 Joho.C.Hullの本で定義されているデフォルト率の式に関して  
@@ -29,7 +34,7 @@ Joho.C.Hullの本で定義されているデフォルト率の式に関して
 $$
 {\rm g(DR|PD,\rho)} = \sqrt{\frac{1-\rho}{\rho}} \exp\biggl\{ \frac{1}{2} \biggl[ (N^{-1}(DR))^2 - \biggl( \frac{\sqrt{1-\rho}N^{-1}(DR)-N^{-1}(PD)}{\sqrt{\rho}}\biggr)^2\biggr]\biggr\}
 $$
-## 対象とするデフォルト密度
+# 対象とするデフォルト密度
 下記の4パターンのデフォルト率の密度関数について重点サンプリングで色々行う
 ```{r}
 g_DR.fn1 <- function(DR)g_DR.fn(0.1,0.2,DR)
@@ -49,16 +54,94 @@ curve(g_DR.fn3,main=expression(paste(rho,"=0.8,",PD,"=0.2")))
 curve(g_DR.fn4,main=expression(paste(rho,"=0.1,",PD,"=0.01")))
 ```
 
-重点サンプリング基本恒等式から、次の推定量を求める。要は期待値
+
+# 重点サンプリング
+
+元々のアイデアとしては・・・  
+通常のモンテカルロ法で、元の分布からサンプリングしようとすると、分布の端がサンプリングされるのに時間がかかり、推定量が収束するまでにかかるサンプル数がたくさん必要
+
+重点サンプリングは、この問題を解決するため欲しい範囲のサンプルを重点的にサンプリングできる重点関数というものを導入しましょうというアイデア。
+
+- 推定量の分散を通常のモンテカルロ法によるものより改善できる
+
+重点サンプリング基本恒等式
+$$
+E_f[h(X)]=\int_{\chi}h(x)\frac{f(x)}{g(x)}g(x)dx=E_g[\frac{h(X)f(X)}{g(X)}]
+$$
+から、次の推定量を求める。これが収束するのは通常のモンテカルロ法が収束するのと同じ理由(大数の強法則)
 $$
 \frac{1}{n}\sum_{j=1}^{m}\frac{f(X_j)}{g(X_j)}h(X_j)\rightarrow E_f[h(X)]
 $$
-とりあえずは(0,1)の一様分布を重点関数g、サンプルサイズは1000とする  
+とりあえずは一様分布(0,1)を重点関数g、サンプルサイズは1000とする  
 hはDRとして、DRの期待値を求める。John.C.Hullによると、この期待値は各密度関数のパラメータPDと一致するはず  
-まぁそれっぽい値
+Pattern3以外はそれっぽい  
+Pattern3だけばらつく理由と、その解決策は後ほど
 ```{r}
 set.seed(10000)
 N <- 1000
+for(t in 1:5){
+sim <- runif(N,0,1)
+weight_1 <-  g_DR.fn1(sim) / dunif(sim)
+weight_2 <-  g_DR.fn2(sim) / dunif(sim)
+weight_3 <-  g_DR.fn3(sim) / dunif(sim)
+weight_4 <-  g_DR.fn4(sim) / dunif(sim)
+weight <- data.frame(weight_1/sum(weight_1),weight_2/sum(weight_2),
+                     weight_3/sum(weight_3),weight_4/sum(weight_4))
+colnames(weight)<- c('pattern1','pattern2','pattern3','pattern4')
+print(colSums(weight * sim))
+}
+```
+
+重点サンプリングによって、一定の値以上をとる確率を計算することができるが、これを95%点の算出に使えないだろうか？  
+とりあえずは、ちょっと難しい。
+
+それぞれの収束の様子  
+やはり、一番左上の、概形が綺麗な密度関数は、収束しやすい  
+極端なパラメータをとって、密度関数がいびつな(極端な?)形をとっていると、収束の様子に違和感がある。
+
+- パターン2の$\rho$が極端に低い場合は、(0,1)の一様関数だと、確率密度が0に近い値が出やすいため、0.2付近の値をとった時だけ大きな値を取るため、その時だけ大きな変動を起こして安定しにくい。  
+- パターン3の$\rho$が極端に高い値をとる場合は、基本的には安定しているが、密度関数の概形から分かるように、1付近に密度を持つため、サンプリング数が足りたいと、1付近がサンプリングされた時に、極端な変動を起こす(200,400付近)  
+- パターン4の$PD$が極端に低い値をとる場合は、比較的安定しているが、左上に比べると収束に時間がかかっていることが分かる。(元の値が小さく安定しているので、他よりもy軸の範囲を狭めている)
+```{r,fig.height=20,fig.width=15}
+par(mfrow=c(5,4))
+set.seed(10000)
+for(t in 1:5){
+sim <- runif(N,0,1)
+weight_1 <-  g_DR.fn1(sim) / dunif(sim)
+weight_2 <-  g_DR.fn2(sim) / dunif(sim)
+weight_3 <-  g_DR.fn3(sim) / dunif(sim)
+weight_4 <-  g_DR.fn4(sim) / dunif(sim)
+weight <- data.frame(weight_1,weight_2,weight_3,weight_4)
+for(i in 1:4){
+  estint <- cumsum(weight[,i]*sim)/1:N
+  esterr <- sqrt(cumsum((weight[,i]*sim-estint)^2))/(1:N)
+  plot(cumsum(weight[,i]*sim)/1:N,type="l",main = title_name[i],ylab = expression(E[DR]),ylim = c(pds[i]/1.5,pds[i]*1.5))
+  lines(estint+2*esterr, col="gold", lwd=2)
+  lines(estint-2*esterr, col="gold", lwd=2)
+  abline(h=pds[i],col='red',lwd=2)
+}
+}
+```
+
+パターン2の場合において、重点関数の範囲が狭まれば、うまくいくはず  
+仮に一様分布(0.15,0.25)にすると、収束する
+```{r ,echo=FALSE}
+set.seed(10001)
+sim <- runif(N,0.1,0.3)
+weight_2_2 <-  g_DR.fn2(sim) / dunif(sim,0.1,0.3)
+sum(weight_2_2 * sim / N)
+estint <- cumsum(weight_2_2*sim)/1:N
+esterr <- sqrt(cumsum((weight_2_2*sim-estint)^2))/(1:N)
+plot(cumsum(weight_2_2*sim)/1:N,type="l",main = title_name[2],ylab = expression(E[DR]),ylim = c(pds[2]/1.5,pds[2]*1.5))
+lines(estint+2*esterr, col="gold", lwd=2)
+lines(estint-2*esterr, col="gold", lwd=2)
+abline(h=pds[2],col='red',lwd=2)
+```
+
+まぁサンプルサイズをふやせば収束する
+```{r ,echo=FALSE}
+set.seed(10000)
+N <- 10000
 sim <- runif(N,0,1)
 weight_1 <-  g_DR.fn1(sim) / dunif(sim)
 weight_2 <-  g_DR.fn2(sim) / dunif(sim)
@@ -67,24 +150,24 @@ weight_4 <-  g_DR.fn4(sim) / dunif(sim)
 weight <- data.frame(weight_1/sum(weight_1),weight_2/sum(weight_2),
                      weight_3/sum(weight_3),weight_4/sum(weight_4))
 colSums(weight * sim)
-```
-重点サンプリングによって、一定の値以上をとる確率を計算することができるが、これを95%点の算出に使えないだろうか？  
-とりあえずは、ちょっと難しい。
 
-それぞれの収束の様子  
-やはり、一番左上の、概形が綺麗な密度関数は、収束しやすい  
-極端なパラメータをとって、密度関数がいびつな(極端な?)形をとっていると、収束の様子に違和感がある。
-
-- 右上の$\rho$が極端に低い場合は、(0,1)の一様関数だと、確率密度が0に近い値が出やすいため、0.2付近の値をとった時だけ大きな値を取るため、その時だけ大きな変動を起こして安定しにくい。  
-- 左下の$\rho$が極端に高い値をとる場合は、基本的には安定しているが、密度関数の概形から分かるように、1付近に密度を持つため、1付近がサンプリングされた時に、極端な変動を起こす  
-- 右下の$PD$が極端に低い値をとる場合は、比較的安定しているが、左上に比べると収束に時間がかかっていることが分かる。
-```{r}
 weight <- data.frame(weight_1,weight_2,weight_3,weight_4)
 par(mfrow=c(2,2))
 for(i in 1:4){
   estint <- cumsum(weight[,i]*sim)/1:N
-  esterr <- sqrt(cumsum((weight[,i]-estint)^2))/(1:N)
-  plot(cumsum(weight[,i]*sim)/1:N,type="l",main = title_name[i],ylab = expression(E[DR]))
+  esterr <- sqrt(cumsum((weight[,i]*sim-estint)^2))/(1:N)
+  plot(cumsum(weight[,i]*sim)/1:N,type="l",main = title_name[i],ylab = expression(E[DR]),ylim = c(pds[i]/1.5,pds[i]*1.5))
+  lines(estint+2*esterr, col="gold", lwd=2)
+  lines(estint-2*esterr, col="gold", lwd=2)
+  abline(h=pds[i],col='red',lwd=2)
+}
+
+weight <- data.frame(weight_1,weight_2,weight_3,weight_4)
+par(mfrow=c(2,2))
+for(i in 1:4){
+  estint <- cumsum(weight[,i]*sim)/1:N
+  esterr <- sqrt(cumsum((weight[,i]*sim-estint)^2))/(1:N)
+  plot(cumsum(weight[,i]*sim)/1:N,type="l",main = title_name[i],ylab = expression(E[DR]),ylim = c(pds[i]/1.5,pds[i]*1.5))
   lines(estint+2*esterr, col="gold", lwd=2)
   lines(estint-2*esterr, col="gold", lwd=2)
   abline(h=pds[i],col='red',lwd=2)
@@ -92,7 +175,34 @@ for(i in 1:4){
 ```
 
 
+## サンプリング重点サンプリング
+有効サンプルサイズなんかを確かめているが
+この辺解説が4章なので現状は保留。  
+weightだけboxplotで確認。
 
+サンプル数10000での結果なので、右下とか良くない。
+```{r}
+par(mfrow=c(2,2))
+for(i in 1:4){
+  boxplot(weight[,i]/sum(weight[,i]),main = title_name[i])
+}
+```
+
+# 重点関数の選択
+
+理論的に最適なものは求まるが実践での有用性は低い  
+去年も式とだけにらめっこして、実装の仕方がわからず断念した
+
+gの妥当性を判断するには、結果の推定量の分散を検討する  
+もとの分布が期待値を持っていれば、ほぼ確実に収束するが、  
+この推定量の分散は、以下の期待値が有限の場合にだけ有限になる。
+$$
+E_g\left[h^2(X)\frac{f^2(X)}{g^2(X)}\right]=E_f\left[h^2(X)\frac{f(X)}{g(X)}\right]=\int_\chi h^2(x)\frac{f^2(x)}{g(x)}dx<\infty
+$$
+
+今は、$f(x)/g(x)=f(x)$
+
+という事は、一様分布を仮定する限り、この問題とは無関係。ただし、$\rho$が限りなく0に近いときはあやしい
 
 
 
