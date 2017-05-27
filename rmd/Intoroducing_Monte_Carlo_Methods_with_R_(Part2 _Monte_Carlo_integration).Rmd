@@ -16,6 +16,7 @@ library(ggplot2)
 library(reshape2)
 library(dplyr)
 library(MASS)
+library(mvtnorm)
 theme_set(theme_bw())
 ```
 
@@ -30,7 +31,7 @@ ParticleFilterに到達する前の重点サンプリングやPMCMC(Particle Mar
 [Wolfeyes Bioinformatics beta](http://yagays.github.io/blog/2012/10/20/archive-introducing-monte-carlo-methods-with-r/)
 
 Rにもともとarea関数とintegrate関数が存在する。ただし、area()は積分で無限の範囲を扱えないし、integrateも安定性に乏しい  
-実験として以下の積分について、integrate関数と実際の値を比較してみる(下記を積分すると$\Gamma$の対数
+実験として以下の積分について、integrate関数と実際の値を比較してみる(下記を積分すると$\Gamma$）
 $$
 \int_{0}^{\infty} x^{\lambda-1}exp(-x)dx
 $$
@@ -40,14 +41,16 @@ ch <- function(la){
   integrate(function(x) {x^{la-1}*exp(-x)}, 0, Inf)$val
 }
 plot_d <- data.frame(x = lgamma(seq(0.01,10,le=100)),y = log(apply(as.matrix(seq(0.01,10,le=100)), 1, ch)))
-ggplot(plot_d,aes(x=x,y=y))+geom_point()
+ggplot(plot_d,aes(x=x,y=y))+geom_point()+xlab('log(integrate(f))')+
+  ylab(expression(paste('log(',Gamma,'(',lambda,'))')))
 ```
+
 この場合は、結構きれい
 
 integrate関数のような数値積分方法で困難なのは、被積分関数にいおいて重要な範囲を見逃しやすいこと。
 これに対してシミュレーションでは、積分にかかわる確率密度の情報を活用することで、この範囲に絞った適用が可能。  
 
-位置パラメータ$\theta=350$とするコーシー分布の乱数10個をサンプルとして検討する。平坦な事前分布を仮定するとサンプルの(疑似)周辺分布が以下のようになる
+位置パラメータ$\theta=350$とするコーシー分布の乱数10個をサンプルとして検討する。一様分布を事前分布に仮定するとサンプルの(疑似)周辺分布が以下のようになる
 $$
 m(x) = \int_{-\infty}^{\infty}\prod_{i=1}^{10} \frac{1}{\pi}\frac{1}{1+(x_i-\theta)^2}d\theta
 $$
@@ -73,11 +76,10 @@ nan=function(a){area(lik,-a,a)}
 x=seq(1,10^3,le=10^4)
 y=log(apply(as.matrix(x),1,nin))
 z=log(apply(as.matrix(x),1,nan))
-plot(x,y,type="l",ylim=range(cbind(y,z)),lwd=2)
 ggplot()+geom_line(data = data.frame(x,y),mapping = aes(x=x,y=y))+geom_line(data = data.frame(x,z),mapping = aes(x=x,y=z),colour='blue',linetype=2)
 ```
 
-## 古典的なモンテカルロ計算
+# 古典的なモンテカルロ計算
 シミュレーションを実際の問題に適用する前に、こうした応用が適正であることを再確認しておく。
 一般に以下の積分をどのように評価するのかということが問題になる。
 $$
@@ -99,17 +101,17 @@ $$
 $$
 v_m = \frac{1}{m^2}\sum_{j=1}^{m}[h(x_j)-\bar{h}_m]^2
 $$
-さらには中心極限定理によってmが十分大きいのであれば、いかが近似的に$N(0,1)$の正規分布をする変数となる。
+さらには中心極限定理によってmが十分大きいのであれば、以下が近似的に$N(0,1)$の正規分布をする変数となる。
 $$
 \frac{\bar{h}_m-E_f[h(X)]}{\sqrt{v_m}}
 $$
 
-
-次の仮の関数で試してみる
+次の仮の関数の[0,1]でモンテカルロ積分を試してみる
 $$
 h(x)= [cos(50x)+sin(20x)]^2
 $$
-上が実際にこの曲線が描く概形で、下がこれの近似式の収束をしめしている
+
+上が実際にこの曲線が描く概形で、下がモンテカルロ積分の収束をしめしている
 ```{r}
 h <- function(x){(cos(50 * x) + sin(20 * x))^2}
 ggplot()+geom_line(mapping=aes(x= 0:100/100,y =h(0:100/100)))
@@ -117,8 +119,8 @@ integrate(h,0,1)
 x <- h(runif(10^4))
 estint <- cumsum(x)/(1:10^4)
 esterr <- sqrt(cumsum((x - estint)^2))/(1:10^4)
-ggplot(data.frame(estint), aes(x=1:10^4,y=estint))+geom_line()+ylim(mean(x)+20*c(-esterr[10^4],esterr[10^4]))+
-  geom_line(mapping = aes(x=1:10^4,y=estint+2*esterr,color="gold"))+geom_line(mapping=aes(x=1:10^4,y=estint-2*esterr,color="gold"))
+ggplot(data.frame(estint), aes(x=1:10^4,y=estint))+geom_line(colour=1)+ylim(c(mean(x)+20*c(-esterr[10^4],esterr[10^4])))+
+  geom_line(mapping = aes(x=1:10^4,y=estint+2*esterr),colour="gold")+geom_line(mapping=aes(x=1:10^4,y=estint-2*esterr),colour="gold")
 ```
 
 ### 練習問題 3.1
@@ -158,6 +160,7 @@ plot(esterr,type='l')
 
 
 # 本題その1
+
 # 重点サンプリング
 上の近似の評価は、たいていの場合は最適ではない
 
@@ -182,6 +185,7 @@ fを正規pdfとし、$h(x)をexp(-(x-3)^2)+exp(-(x-6)^2/2)$として期待値$E
 ```{r}
 N <- 10^3
 h <- function(x){exp(-(x-3)^2/2)+exp(-(x-6)^2/2)}
+curve(h,-10,10)
 sample <- rnorm(N)
 n_mc_est <- cumsum(h(sample))/c(1:length(sample))
 n_mc_err <- sqrt(cumsum((sample - n_mc_est)^2))/(1:length(sample))
@@ -194,10 +198,9 @@ n_mc_est[N]
 ```
 
 - 一様分布u(-8,-1)に対応する重点関数gにもとづくサンプルサイズ$10^3$の重点サンプリング近似と比較する。(これは収束しない　範囲を網羅してない)  
-・・・そのわりには収束してるっぽい
 ```{r}
 sample_g <- runif(N,-8,-1)
-g_mc_est <- h(sample_g) * dnorm(sample_g) / dunif(sample_g,-8,-1) /c(1:length(sample_g))
+g_mc_est <- cumsum(h(sample_g) * dnorm(sample_g))  /c(1:length(sample_g))
 g_mc_err <- sqrt(cumsum((h(sample_g) * dnorm(sample_g) / dunif(sample_g,-8,-1) - g_mc_est)^2))/c(1:length(sample_g))
 g_mc <- data.frame(est = g_mc_est,error_max = g_mc_est + 2 * g_mc_err,error_min = g_mc_est - 2 * g_mc_err)
 ggplot(g_mc,aes(x=1:length(sample),y=est))+geom_line(colour='red')+
@@ -207,9 +210,9 @@ ggplot(g_mc,aes(x=1:length(sample),y=est))+geom_line(colour='red')+
 ```
 
 ```{r}
-sample_g <- runif(N,-2,10)
-g_mc_est <- h(sample_g) * dnorm(sample_g) / dunif(sample_g,-2,10) /c(1:length(sample_g))
-g_mc_err <- sqrt(cumsum((h(sample_g) * dnorm(sample_g) / dunif(sample_g,-2,10) - g_mc_est)^2))/c(1:length(sample_g))
+sample_g <- runif(N,-10,10)
+g_mc_est <- cumsum(h(sample_g) * dnorm(sample_g) / dunif(sample_g,-10,10)) / c(1:length(sample_g)) 
+g_mc_err <- sqrt(cumsum((h(sample_g) * dnorm(sample_g) / dunif(sample_g,-10,10) - g_mc_est)^2))/c(1:length(sample_g))
 g_mc <- data.frame(est = g_mc_est,error_max = g_mc_est + 2 * g_mc_err,error_min = g_mc_est - 2 * g_mc_err)
 ggplot(g_mc,aes(x=1:length(sample),y=est))+geom_line(colour='red')+
   geom_line(mapping = aes(x=1:length(sample),y=error_max),colour='gold')+
@@ -238,21 +241,27 @@ $$
 \frac{1}{m}\sum_{i=1}^{m}\frac{f(Y^{(i)})}{g(Y^{(i)})}=\frac{1}{m}\sum_{i=1}^{m}\frac{e^{-Y_i^2-4.5}}{\sqrt{2\pi}}
 $$
 ```{r}
+ted <- function(y){dexp(y-4.5)}
+curve(ted,0,10)
 Nsim <- 10^3
 y <- rexp(Nsim) + 4.5
-weit =dnorm(y)/dexp(y-4.5)
+weit <- dnorm(y)/dexp(y-4.5)
 plot(cumsum(weit)/1:Nsim,type="l")
 abline(a=pnorm(-4.5),b=0,col="red")
 ```
+
 かなり早い段階で収束している。
 
 ### 練習問題3.5  
 上の例で指数分布が切り詰められると、裾の確率近似の分散に影響することを調べる
-```{r}
-par(mfrow=c(2,2))
+```{r, fig.height=40, fig.width=20}
+par(mfrow=c(4,2))
+Nsim <- 10^4
+x <- rexp(Nsim)
 for(lambda in c(1, 5, 10, 20)){
-  Nsim <- 10^4
-  y <- rexp(Nsim)/lambda+4.5
+  ted <- function(y){dexp(y-4.5,lambda)}
+  curve(ted,0,10)
+  y <- x/lambda+4.5
   weit <- dnorm(y)/dexp(y-4.5, lambda)
   estint <- cumsum(weit)/1:Nsim
   esterr <- sqrt(cumsum((weit-estint)^2))/(1:Nsim)
@@ -279,7 +288,7 @@ $$
 $$
 \pi(\alpha,\beta|x)\propto \left\{\frac{\Gamma(\alpha + \beta)}{\Gamma(\alpha)\Gamma(\beta)}\right\}^{\lambda+1}[xx_0]^{\alpha}[(1-x)y_0]^{\beta}
 $$
-この分布は、ガンマが扱いにくいというだけでも制御しにくい。そのため
+この分布は、ガンマが扱いにくいというだけでも制御しにくい。そのため、重点関数が欲しいので、予備調査として、$\pi(\alpha,\beta|\pi)$をグラフ表示してみる。
 
 ```{r}
 f <- function(a,b){
@@ -294,7 +303,7 @@ image(aa,bb,post,xlab=expression(alpha),ylab="")
 contour(aa,bb,post,add=T)
 
 ```
-対($\alpha,\beta$)には正規ないしスチューデントのt分布が適切そう  
+対($\alpha,\beta$)には正規分布かスチューデントのt分布が適切そう  
 スチューデント$T(3,\mu,\sum)$分布で$\mu=(50,45)$とし
 $$
 \Sigma=
@@ -303,7 +312,20 @@ $$
 190 & 180 
 \end{matrix}
 $$
-の場合でシミュレーションした結果、次のように適切な当てはめが得られる。この共分散行列は著者が試行錯誤して得られたもの
+の場合でシミュレーションした結果、次のように適切な当てはめが得られる。この共分散行列は著者が試行錯誤して得られたもの  
+元々独立で、分散1の2変数の乱数に対してコレスキー分解した分散共分散行列をかけると、
+$$
+\Sigma=
+\begin{matrix}
+\sigma_1^2 & \sigma_{12} \\
+\sigma_{21} & \sigma_2^2 
+\end{matrix}\\
+col(\Sigma)=
+\begin{matrix}
+\sigma_1 & 0 \\
+\frac{\sigma_{12}}{\sigma_{1}} & \sqrt{\sigma_2^2- \frac{\sigma_{12}}{\sigma_{1}}}
+\end{matrix}
+$$
 
 ```{r}
 x <- matrix(rt(2*10^4,3),ncol=2)
@@ -313,21 +335,20 @@ y <- t(t(chol(E)) %*% t(x)+c(50,45))
 points(y, cex=0.6,pch=19)
 ```
 
-ここで共分散行列をEとするために、t(cho(E))を使っていることに注意。  
-もしも対象となっている量が、ベイズにおけるモデル比較のように周辺尤度であるならば
+対象とする量が、ベイズにおけるモデル比較のように周辺尤度であるならば
 $$
 m(x)=\int_{R^2_+}f(x|\alpha,\beta)\pi(\alpha,\beta)d\alpha d\beta\\
 =\frac{\int_{R_+^2}\left\{\frac{\Gamma(\alpha+\beta)}{\Gamma(\alpha)\Gamma(\beta)}\right\}^{\lambda+1}[xx_0]^{\alpha}[(1-x)y_0]^{\beta}d\alpha d\beta}{x(1-x)\int_{R^2_+} \left\{\frac{\Gamma(\alpha+\beta)}{\Gamma(\alpha)\Gamma(\beta)}\right\}^{\lambda}x_0^{\alpha}y_0^{\beta}d\alpha d\beta}
 $$
 
-二つの積分を近似する必要があるが、どちらにも同じtサンプルを利用することができる。事前分布の曲面への当てはめがどちらも同じように適切なため。この近似は以下の様になる。
+二つの積分を近似する必要があるが、どちらにも同じtサンプルを利用することができる。この近似は以下の様になる。
 
 $$
 \hat{m}(x)
 =\frac{\sum_{i=1}^{n}\left\{\frac{\Gamma(\alpha_i+\beta_i)}{\Gamma(\alpha_i)\Gamma(\beta_i)}\right\}^{\lambda+1}[xx_0]^{\alpha_i}[(1-x)y_0]^{\beta_i}/g(\alpha_i,\beta_i)}
 {\sum_{i=1}^{n} \left\{\frac{\Gamma(\alpha_i+\beta_i)}{\Gamma(\alpha_i)\Gamma(\beta_i)}\right\}^{\lambda}x_0^{\alpha_i}y_0^{\beta_i}/g(\alpha_i,\beta_i)}
 $$
-???分母のx(1-x)どこいった??  
+
 ここで$(\alpha_i,\beta_i)_{i\leq i \leq n}$はgからのnの独立同分布の実現値。
 
 ```{r}
